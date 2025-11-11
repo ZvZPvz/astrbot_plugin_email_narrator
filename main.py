@@ -137,12 +137,19 @@ class EmailNarrator(Star):
         """将一封邮件广播给所有已启用的目标用户。"""
         if not self._targets:
             return
-        
+    
+        tasks = []
         for target_uid in list(self._targets):
             if target_event := self._event_map.get(target_uid):
-                await self._process_and_narrate_email(target_event, email_user, email_data['subject'], email_data['content'])
+                task = self._process_and_narrate_email(
+                    target_event, email_user, email_data['subject'], email_data['content']
+                )
+                tasks.append(task)
             else:
                 logger.warning(f"[{_metadata['name']}] 目标 {target_uid} 已启用但找不到事件实例，可能用户已离线。")
+        
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _process_and_narrate_email(self, event: AstrMessageEvent, email_user: str, subject: str, content: str):
         session_id = event.unified_msg_origin
@@ -323,3 +330,4 @@ class EmailNarrator(Star):
         await self._stop_email_service()
 
         logger.info(f"[{_metadata['name']}] 插件已终止。")
+
