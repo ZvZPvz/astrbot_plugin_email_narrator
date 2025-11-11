@@ -1,0 +1,32 @@
+{
+  "accounts": {
+    "description": "邮箱账户列表",
+    "type": "list",
+    "hint": "每行一个账户，格式为：imap服务器,邮箱地址,应用密码。例如：imap.gmail.com,test@gmail.com,your_app_password"
+  },
+  "preconfigured_targets": {
+    "description": "预设的推送目标列表",
+    "type": "list",
+    "hint": "在此处填写的会话ID将总被视为推送目标，无需使用/on指令。请填写完整的unified_msg_origin，例如：QQ:FriendMessage:12345678"
+  },
+  "interval": {
+    "description": "邮件检查间隔（秒）",
+    "type": "float",
+    "default": 10,
+    "hint": "建议不要设置得太低，以免IP被封锁。最小值为 3。"
+  },
+  "text_num": {
+    "description": "邮件内容预览字符上限",
+    "type": "int",
+    "default": 150,
+    "hint": "截取邮件正文的前N个字符交给LLM处理。最小值为 20。"
+  },
+  "prompt_template": {
+    "description": "邮件播报指令模板",
+    "type": "text",
+    "default": "（系统指令：你刚收到一封新邮件，请根据你的人格，用自然的口吻告诉用户这件事。邮件来自邮箱账号: {{user}}，主题是: '{{subject}}'，内容摘要是: '{{content}}'。请直接生成你要说的话，不要复述本条指令。）",
+    "hint": "这是一个高级设置。{{user}}, {{subject}}, {{content}} 是变量，将被替换为实际的邮件信息。",
+    "editor_mode": true,
+    "editor_language": "text"
+  }
+}
