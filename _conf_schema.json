@@ -12,13 +12,13 @@
   "interval": {
     "description": "邮件检查间隔（秒）",
     "type": "float",
-    "default": 10,
+    "default": 15,
     "hint": "建议不要设置得太低，以免IP被封锁。最小值为 3。"
   },
   "text_num": {
     "description": "邮件内容预览字符上限",
     "type": "int",
-    "default": 150,
+    "default": 300,
     "hint": "截取邮件正文的前N个字符交给LLM处理。最小值为 20。"
   },
   "prompt_template": {
@@ -31,3 +31,4 @@
   }
 
 }
+
