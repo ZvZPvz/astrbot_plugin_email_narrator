@@ -232,11 +232,7 @@ class EmailNarrator(Star):
 
     @cmd_group.command("on", alias={"开启"})
     async def cmd_on(self, event: AstrMessageEvent):
-        if not event.is_admin():
-            yield event.plain_result("❌ 权限不足，此指令仅限管理员使用。")
-            return
         uid = event.unified_msg_origin
-        print(uid)
         if uid in self._targets:
             yield event.plain_result("✅ 邮件播报功能已经开启啦！")
             return
@@ -325,4 +321,5 @@ class EmailNarrator(Star):
         
     async def terminate(self):
         await self._stop_email_service()
+
         logger.info(f"[{_metadata['name']}] 插件已终止。")
