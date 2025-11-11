@@ -5,7 +5,6 @@ import traceback
 from typing import List, Optional, Dict, Set
 import yaml
 
-from astrbot.core.agent.message import AssistantMessageSegment, UserMessageSegment
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register, StarTools
 from astrbot.api import logger, AstrBotConfig
@@ -341,3 +340,4 @@ class EmailNarrator(Star):
         for notifier in self._notifiers.values():
             await notifier.disconnect()
         logger.info(f"[{_metadata['name']}] 插件已终止。")
+
