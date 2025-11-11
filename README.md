@@ -40,7 +40,7 @@ _✨ [astrbot](https://github.com/AstrBotDevs/AstrBot) A2S协议服务器状态�
 
 2.  **预设的推送目标列表 (Preconfigured Targets)**:
     如果你希望某些会话（如管理员群）总是接收邮件通知，而无需手动开启，可以在这里填写完整的会话ID。
-    -   如何获取会话ID？在目标会话中触发机器人，然后查看 AstrBot 后台日志，复制 `unified_msg_origin` 即可。格式如：`aiocqhttp:group:12345678`。
+    -   如何获取会话ID？在目标会话中触发机器人，然后查看 AstrBot WebUI → 更多功能 → 会话管理，复制 消息会话来源 即可。格式如：`QQ:GroupMessage:12345678`。
 
 3.  **其他配置**:
     -   **邮件检查间隔**: 轮询邮箱的秒数，建议不要低于10秒。
@@ -79,4 +79,4 @@ _✨ [astrbot](https://github.com/AstrBotDevs/AstrBot) A2S协议服务器状态�
 ## # 支持
 -   本插件需要处理你的邮件内容才能生成播报。所有处理均在本地完成，不会上传到任何第三方服务器。
 -   请务必使用**应用密码 (App Password)** 而非你的主密码来配置邮箱账户，以保障账户安全。
--   本插件灵感来源于 [https://github.com/DBJD-CR/astrbot_plugin_proactive_chat](https://github.com/DBJD-CR/astrbot_plugin_proactive_chat) 和 [https://github.com/OlyMarco/EmailNotixion](https://github.com/OlyMarco/EmailNotixion)
+-   本插件灵感和部分参照来源于 [https://github.com/DBJD-CR/astrbot_plugin_proactive_chat](https://github.com/DBJD-CR/astrbot_plugin_proactive_chat) 和 [https://github.com/OlyMarco/EmailNotixion](https://github.com/OlyMarco/EmailNotixion)
