@@ -1,5 +1,5 @@
 name: "astrbot_plugin_email_narrator"
 author: "ZvZPvz"
-description: "一个智能邮件播报插件，能接收邮件并让继承了会话和人格的LLM来通知用户。"
+description: "一个智能邮件播报插件，能接收邮件并让继承了会话和人格的LLM来通知用户"
 version: "1.0.0"
 repo: "https://github.com/ZvZPvz/astrbot_plugin_email_narrator"
