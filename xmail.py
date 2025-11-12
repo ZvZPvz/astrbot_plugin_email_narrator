@@ -1,4 +1,5 @@
 # xmail.py
+import asyncio
 import email as email_stdlib
 from email.message import Message
 from datetime import datetime
@@ -24,14 +25,21 @@ class EmailNotifier:
 
     @staticmethod
     async def test_connection(host: str, user: str, password: str, logger=None) -> bool:
+        test_mail = None
         try:
-            async with aioimaplib.IMAP4_SSL(host) as test_mail:
-                await test_mail.login(user, password)
-                await test_mail.logout()
+            test_mail = aioimaplib.IMAP4_SSL(host)
+            await test_mail.wait_hello_from_server()
+            await test_mail.login(user, password)
             return True
         except Exception as e:
             if logger: logger.error(f"[EmailNotifier] 连接测试失败 {user}: {e}")
             return False
+        finally:
+            if test_mail:
+                try:
+                    await test_mail.logout()
+                except Exception:
+                    pass
 
     async def _connect(self):
         if self.mail:
@@ -57,13 +65,32 @@ class EmailNotifier:
     def _html_to_text(self, html_content: str) -> str:
         if not html_content: return ""
         try:
-            soup = BeautifulSoup(html_content, "html.parser"); [s.decompose() for s in soup(["script", "style"])]; text = soup.get_text(); lines = (l.strip() for l in text.splitlines()); chunks = (p.strip() for l in lines for p in l.split("  ")); return ' '.join(c for c in chunks if c)
-        except Exception: return "（HTML内容解析失败）"
+            soup = BeautifulSoup(html_content, "html.parser")
+            for s in soup(["script", "style"]):
+                s.decompose()
+            text = soup.get_text()
+            lines = (line.strip() for line in text.splitlines())
+            text_parts = []
+            for line in lines:
+                for phrase in line.split("  "):
+                    stripped_phrase = phrase.strip()
+                    if stripped_phrase:
+                        text_parts.append(stripped_phrase)
+            return ' '.join(text_parts)
+        except Exception:
+            return "（HTML内容解析失败）"
 
     def _decode_header(self, header: str) -> str:
         try:
-            parts = []; [parts.append(p.decode(c or 'utf-8', 'ignore') if isinstance(p, bytes) else str(p)) for p, c in email_stdlib.header.decode_header(header)]; return "".join(parts)
-        except Exception: return str(header)
+            decoded_parts = []
+            for part, charset in email_stdlib.header.decode_header(header):
+                if isinstance(part, bytes):
+                    decoded_parts.append(part.decode(charset or 'utf-8', 'ignore'))
+                else:
+                    decoded_parts.append(str(part))
+            return "".join(decoded_parts)
+        except Exception:
+            return str(header)
 
     def _parse_date(self, date_str: Optional[str]) -> Optional[datetime]:
         if not date_str: return None
@@ -92,29 +119,15 @@ class EmailNotifier:
         return body
 
     def _parse_email_message(self, msg: Message) -> Dict[str, Any]:
-        """
-        将原始的email.message对象解析为其关键组件，并返回一个字典。
-        """
         subject = self._decode_header(msg['Subject'] or "（无主题）")
         sender = self._decode_header(msg['From'] or "（未知发件人）")
         recipient = self._decode_header(msg['To'] or "（未知收件人）")
         email_date = self._parse_date(msg.get('Date'))
-        
         body = self._extract_body(msg)
-        
         final_body = ' '.join(body.split())
-        if len(final_body) > self.text_num:
-            final_body = final_body[:self.text_num] + "..."
-        if not final_body:
-            final_body = "（无文本内容）"
-            
-        return {
-            "subject": subject,
-            "content": final_body,
-            "date": email_date,
-            "sender": sender,
-            "recipient": recipient
-        }
+        if len(final_body) > self.text_num: final_body = final_body[:self.text_num] + "..."
+        if not final_body: final_body = "（无文本内容）"
+        return {"subject": subject, "content": final_body, "date": email_date, "sender": sender, "recipient": recipient}
 
     async def fetch_new_emails(self, last_known_uid: Optional[str]) -> Tuple[List[Dict[str, Any]], Optional[str]]:
         try:
@@ -166,6 +179,9 @@ class EmailNotifier:
                     msg_bytes = fetch_result.lines[1]
                     msg = email_stdlib.message_from_bytes(msg_bytes)
                     parsed_data = self._parse_email_message(msg)
+
+                    parsed_data['uid'] = uid_str
+                    
                     new_emails.append(parsed_data)
 
             return new_emails, latest_uid_on_server
