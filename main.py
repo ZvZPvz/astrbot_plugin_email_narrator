@@ -5,6 +5,7 @@ import traceback
 from typing import List, Optional, Dict, Set
 import yaml
 
+from astrbot.core.agent.message import AssistantMessageSegment, UserMessageSegment
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register, StarTools
 from astrbot.api import logger, AstrBotConfig
@@ -105,29 +106,17 @@ class EmailNarrator(Star):
 
     async def _email_monitor_loop(self):
         """邮件监控的异步主循环，使用持久化UID。"""
-        logger.info(f"[{_metadata['name']}] 邮件监控服务已启动，并发监控 {len(self._notifiers)} 个账号。")
+        logger.info(f"[{_metadata['name']}] 邮件监控服务已启动，监控 {len(self._notifiers)} 个账号。")
 
         while self._is_running:
             try:
-                # --- 【优化】并发检查所有邮箱 ---
-                tasks = []
-                # 创建所有检查任务
                 for user, notifier in self._notifiers.items():
                     last_uid = self._last_uids.get(user)
-                    tasks.append(notifier.fetch_new_emails(last_uid))
-
-                # 使用 asyncio.gather 并发执行所有任务
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-                
-                # --- 处理所有结果 ---
-                for i, result in enumerate(results):
-                    user = list(self._notifiers.keys())[i] # 获取对应的 user
                     
-                    if isinstance(result, Exception):
-                        logger.error(f"[{_metadata['name']}] 监控邮箱 {user} 时发生错误: {result}")
-                        continue
-                    
-                    new_emails, latest_uid = result
+                    # 在线程中运行阻塞的网络IO
+                    new_emails, latest_uid = await asyncio.to_thread(
+                        notifier.fetch_new_emails, last_uid
+                    )
                     
                     # 只要返回了有效的UID，就更新状态
                     if latest_uid and self._last_uids.get(user) != latest_uid:
@@ -320,7 +309,9 @@ class EmailNarrator(Star):
                 host, user, password = [part.strip() for part in account_str.split(',')]
                 
                 # 在线程中运行阻塞的连接测试
-                is_ok = await EmailNotifier.test_connection(host, user, password, logger)
+                is_ok = await asyncio.to_thread(
+                    EmailNotifier.test_connection, host, user, password, logger
+                )
 
                 if is_ok:
                     status_list.append(f"  - {user}: ✅ 连接成功")
@@ -337,7 +328,5 @@ class EmailNarrator(Star):
         
     async def terminate(self):
         await self._stop_email_service()
-        for notifier in self._notifiers.values():
-            await notifier.disconnect()
-        logger.info(f"[{_metadata['name']}] 插件已终止。")
 
+        logger.info(f"[{_metadata['name']}] 插件已终止。")
