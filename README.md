@@ -10,21 +10,24 @@ _✨ [astrbot](https://github.com/AstrBotDevs/AstrBot) 智能邮件播报插件 
 
 ## ✨ 功能特性
 
--   **智能播报**：利用 LLM 和人格设定，将冰冷的邮件通知转化为符合机器人性格的自然语言对话。
+-   **智能播报**：利用 LLM 和人格设定，将冰冷的邮件通知转化为符合机器人性格的自然语言对话。现在支持传入**发件人**和**收件人**信息，让播报更具上下文。
+-   **健壮的错误处理与重试**：当 LLM 处理失败时，插件会自动重试，确保临时性网络或服务问题不会导致邮件丢失。
+-   **后备通知机制**：在达到最大重试次数后，插件会自动发送一条包含原始邮件信息的**后备通知**，保证您在任何情况下都能收到提醒。
+-   **固定目标模式**：可选择将邮件通知锁定到预设的会话目标，禁用指令开关，适合作为服务器或团队的专用通知渠道。
 -   **会话继承**：每次邮件播报都会被记入对话历史，方便用户进行追问等上下文相关的操作。
 -   **永不丢信**：采用持久化的 UID 追踪机制，即使机器人离线重启，也能收到所有错过的邮件。
 -   **多账户支持**：可同时监控多个不同的邮箱账户。
--   **稳定解析**：使用 `BeautifulSoup` 进行健壮的 HTML 邮件解析，避免乱码和解析失败。
--   **多用户推送**：支持向多个目标（私聊或群聊）同时推送邮件通知。
+-   **全异步架构**：基于 `aioimaplib` 重构，性能更高，不会阻塞 AstrBot 主进程。
 
 ## 📦 安装
 
-- 在Astrbot插件市场安装或下载仓库zip手动安装
-- 需要使在插件配置里设置邮箱帐户
-### Gmail配置
-1. 开启两步验证
-2. 生成应用专用密码
-3. 使用应用专用密码连接
+-   在 AstrBot 插件市场安装或下载仓库 zip 手动安装。
+-   **重要**: 需要在插件配置里设置邮箱帐户后才能使用。
+
+### Gmail 配置示例
+1.  在您的 Google 账户中开启两步验证。
+2.  进入 [Google 应用专用密码](https://myaccount.google.com/apppasswords) 页面。
+3.  生成一个新的应用专用密码，并将此密码用于插件配置。
 
 ## ⚙️ 配置
 
@@ -36,16 +39,17 @@ _✨ [astrbot](https://github.com/AstrBotDevs/AstrBot) 智能邮件播报插件 
     imap.gmail.com,your.email@gmail.com,your_google_app_password
     imap.qq.com,123456@qq.com,your_qq_app_password
     ```
-    > ⚠️ **安全警告**: 应用密码虽然方便，但请妥善保管。建议为本插件创建专用的应用密码，并不要在其他地方使用。
 
 2.  **预设的推送目标列表 (Preconfigured Targets)**:
     如果你希望某些会话（如管理员群）总是接收邮件通知，而无需手动开启，可以在这里填写完整的会话ID。
-    -   如何获取会话ID？在目标会话中触发机器人，然后查看 AstrBot WebUI → 更多功能 → 会话管理，复制 消息会话来源 即可。格式如：`QQ:GroupMessage:12345678`。
+    -   如何获取会话ID？在目标会话中触发机器人，然后查看 AstrBot WebUI → 更多功能 → 会话管理，复制 `消息会话来源` 即可。格式如：`QQ:GroupMessage:12345678`。
 
 3.  **其他配置**:
-    -   **邮件检查间隔**: 轮询邮箱的秒数，建议不要低于10秒。
+    -   **邮件检查间隔**: 轮询邮箱的秒数，建议设置为 **30秒或更高**，以避免IP被封锁。
     -   **邮件内容预览字符上限**: 截取邮件正文的前 N 个字符交给 LLM 处理。
-    -   **邮件播报指令模板**: 高级功能，可自定义发送给 LLM 的指令模板。
+    -   **最大重试次数**: 当 LLM 处理失败时，在发送后备通知前的最大重试次数。`0` 表示无限重试。
+    -   **固定推送目标模式**: 启用后，`on`/`off` 指令将失效，邮件只会推送到“预设的推送目标列表”中。
+    -   **邮件播报指令模板**: 高级功能，可自定义发送给 LLM 的指令模板。现在支持 `{{sender}}` 和 `{{recipient}}` 变量。
 
 ## ⌨️ 使用说明
 
@@ -55,19 +59,27 @@ _✨ [astrbot](https://github.com/AstrBotDevs/AstrBot) 智能邮件播报插件 
 /email_narrator on
 别名: /邮件播报 开启
 功能: 在当前会话开启邮件播报功能。
+> ℹ️ 在“固定推送目标模式”下，此指令将被禁用。
 
 /email_narrator off
 别名: /邮件播报 关闭
 功能: 在当前会话关闭邮件播报功能。
+> ℹ️ 在“固定推送目标模式”下，此指令将被禁用。
 
 /email_narrator status
 别名: /邮件播报 状态
-功能: 查看插件的当前运行状态、监控的账号数量等信息。
+功能: 查看插件的当前运行状态、监控的账号数量、运行模式等信息。
 
 /email_narrator check_accounts
 别名: /邮件播报 检查账号
 功能: (仅限管理员) 测试所有已配置邮箱账号的连接性，并返回状态报告。
 ```
+
+## ⚠️ 注意事项与安全
+
+-   **隐私**: 本插件需要处理您的邮件内容才能生成播报。所有处理均在本地完成，不会上传到任何第三方服务器。
+-   **安全**: 请务必使用**应用密码 (App Password)** 而非您的主密码来配置邮箱账户，以保障账户安全。
+-   **灵感来源**: 本插件灵感和部分参照来源于 [DBJD-CR/astrbot_plugin_proactive_chat](https://github.com/DBJD-CR/astrbot_plugin_proactive_chat) 和 [OlyMarco/EmailNotixion](https://github.com/OlyMarco/EmailNotixion)。
 
 ## 👥 贡献指南
 
@@ -75,8 +87,3 @@ _✨ [astrbot](https://github.com/AstrBotDevs/AstrBot) 智能邮件播报插件 
 -   🐛 提交 Issue 报告问题
 -   💡 提出新功能建议
 -   🔧 提交 Pull Request 改进代码
-
-## # 支持
--   本插件需要处理你的邮件内容才能生成播报。所有处理均在本地完成，不会上传到任何第三方服务器。
--   请务必使用**应用密码 (App Password)** 而非你的主密码来配置邮箱账户，以保障账户安全。
--   本插件灵感和部分参照来源于 [https://github.com/DBJD-CR/astrbot_plugin_proactive_chat](https://github.com/DBJD-CR/astrbot_plugin_proactive_chat) 和 [https://github.com/OlyMarco/EmailNotixion](https://github.com/OlyMarco/EmailNotixion)
