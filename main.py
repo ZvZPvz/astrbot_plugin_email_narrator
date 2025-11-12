@@ -41,21 +41,24 @@ class EmailNarrator(Star):
         self.data_dir = StarTools.get_data_dir("email_narrator")
         self.state_file = os.path.join(self.data_dir, "narrator_state.json")
         self._last_uids: Dict[str, str] = {}
+        self._session_locks: Dict[str, asyncio.Lock] = {}
+
+        self._retry_counts: Dict[str, Dict[str, int]] = {}
+
         self._interval = max(float(self.config.get("interval", 30)), 15.0)
         self._text_num = max(int(self.config.get("text_num", 150)), 20)
-        self._session_locks: Dict[str, asyncio.Lock] = {}
+        self._max_retries = int(self.config.get("max_retries", 3))
+        
         logger.info(f"[{_metadata['name']}] v{_metadata['version']} 插件初始化完成。")
 
     async def initialize(self):
         self._load_state()
         is_fixed_mode = self.config.get("fixed_target", False)
         preconfigured_targets = self.config.get("preconfigured_targets", [])
-        if preconfigured_targets:
-            self._targets.update(preconfigured_targets)
+        if preconfigured_targets: self._targets.update(preconfigured_targets)
         if not is_fixed_mode:
             saved_targets = self.config.get("active_targets", [])
-            if saved_targets:
-                self._targets.update(saved_targets)
+            if saved_targets: self._targets.update(saved_targets)
         if self._targets:
             self._init_notifiers()
             self._start_email_service()
@@ -63,18 +66,14 @@ class EmailNarrator(Star):
     def _load_state(self):
         if os.path.exists(self.state_file):
             try:
-                with open(self.state_file, 'r', encoding='utf-8') as f:
-                    self._last_uids = json.load(f)
-            except Exception as e:
-                logger.error(f"[{_metadata['name']}] 加载状态文件失败: {e}")
+                with open(self.state_file, 'r', encoding='utf-8') as f: self._last_uids = json.load(f)
+            except Exception as e: logger.error(f"[{_metadata['name']}] 加载状态文件失败: {e}")
     
     def _save_state(self):
         try:
             os.makedirs(self.data_dir, exist_ok=True)
-            with open(self.state_file, 'w', encoding='utf-8') as f:
-                json.dump(self._last_uids, f, indent=4)
-        except Exception as e:
-            logger.error(f"[{_metadata['name']}] 保存状态文件失败: {e}")
+            with open(self.state_file, 'w', encoding='utf-8') as f: json.dump(self._last_uids, f, indent=4)
+        except Exception as e: logger.error(f"[{_metadata['name']}] 保存状态文件失败: {e}")
 
     def _init_notifiers(self):
         self._notifiers.clear()
@@ -82,11 +81,9 @@ class EmailNarrator(Star):
         for account_str in accounts_config:
             try:
                 host, user, password = [part.strip() for part in account_str.split(',')]
-                notifier = EmailNotifier(host, user, password, logger)
-                notifier.text_num = self._text_num
+                notifier = EmailNotifier(host, user, password, logger); notifier.text_num = self._text_num
                 self._notifiers[user] = notifier
-            except Exception as e:
-                logger.error(f"[{_metadata['name']}] 初始化邮箱账号失败: {account_str} -> {e}")
+            except Exception as e: logger.error(f"[{_metadata['name']}] 初始化邮箱账号失败: {account_str} -> {e}")
 
     async def _email_monitor_loop(self):
         logger.info(f"[{_metadata['name']}] 邮件监控服务已启动，监控 {len(self._notifiers)} 个账号。")
@@ -96,21 +93,31 @@ class EmailNarrator(Star):
                     last_uid = self._last_uids.get(user)
                     new_emails, _ = await notifier.fetch_new_emails(last_uid)
 
-                    if not new_emails:
-                        continue
+                    if not new_emails: continue
 
                     logger.info(f"[{_metadata['name']}] 邮箱 {user} 收到 {len(new_emails)} 封新邮件，准备逐一处理...")
                     
                     for email_data in new_emails:
-                        success = await self._broadcast_to_targets(user, email_data)
+                        uid = email_data.get('uid', 'N/A')
+                        if uid == 'N/A': continue
+
+                        current_retry = self._retry_counts.get(user, {}).get(uid, 0)
+
+                        if self._max_retries > 0 and current_retry >= self._max_retries:
+                            logger.warning(f"[{_metadata['name']}] 邮件 UID {uid} 已达到最大重试次数 ({current_retry}/{self._max_retries})。发送后备通知。")
+                            success = await self._broadcast_fallback(user, email_data)
+                        else:
+                            success = await self._broadcast_to_targets(user, email_data)
                         
                         if success:
-                            current_uid = email_data['uid']
-                            self._last_uids[user] = current_uid
+                            self._last_uids[user] = uid
                             self._save_state()
-                            logger.info(f"[{_metadata['name']}] 成功处理邮件 UID {current_uid}。状态已更新。")
+                            if user in self._retry_counts and uid in self._retry_counts[user]:
+                                self._retry_counts[user].pop(uid)
+                            logger.info(f"[{_metadata['name']}] 成功处理邮件 UID {uid}。状态已更新。")
                         else:
-                            logger.warning(f"[{_metadata['name']}] 处理邮件 UID {email_data.get('uid', 'N/A')} 失败。将在下一个周期重试。")
+                            self._retry_counts.setdefault(user, {})[uid] = current_retry + 1
+                            logger.warning(f"[{_metadata['name']}] 处理邮件 UID {uid} 失败 (尝试次数: {current_retry + 1})。将在下一个周期重试。")
                             break
                 
                 await asyncio.sleep(self._interval)
@@ -120,16 +127,29 @@ class EmailNarrator(Star):
 
     async def _broadcast_to_targets(self, email_user: str, email_data: dict) -> bool:
         if not self._targets: return True
-        
-        tasks = [
-            self._process_and_narrate_email(target_uid, email_user, email_data)
-            for target_uid in list(self._targets)
-        ]
-        
+        tasks = [self._process_and_narrate_email(uid, email_user, email_data) for uid in list(self._targets)]
         if not tasks: return True
-
         results = await asyncio.gather(*tasks)
         return all(results)
+
+    async def _broadcast_fallback(self, email_user: str, email_data: dict) -> bool:
+        if not self._targets: return True
+        tasks = [self._send_fallback_message(uid, email_user, email_data) for uid in list(self._targets)]
+        if not tasks: return True
+        results = await asyncio.gather(*tasks)
+        return all(results)
+
+    async def _send_fallback_message(self, session_id: str, email_user: str, email_data: dict) -> bool:
+        try:
+            subject = email_data.get("subject", "（无主题）")
+            content = email_data.get("content", "（无内容）")
+            sender = email_data.get("sender", "（未知）")
+            fallback_msg = f"📧 新邮件通知 (来自: {email_user})\n- 发件人: {sender}\n- 主题: {subject}\n- 内容: {content}"
+            await self.context.send_message(session_id, MessageChain([Plain(fallback_msg)]))
+            return True
+        except Exception as e:
+            logger.error(f"[{_metadata['name']}] 发送后备通知到 {session_id} 失败: {e}")
+            return False
 
     async def _process_and_narrate_email(self, session_id: str, email_user: str, email_data: dict) -> bool:
         lock = self._session_locks.setdefault(session_id, asyncio.Lock())
@@ -143,29 +163,24 @@ class EmailNarrator(Star):
 
                 if not provider:
                     logger.warning(f"[{_metadata['name']}] 无法为 {session_id} 找到LLM Provider，将发送原始文本。")
-                    fallback_msg = f"📧 新邮件通知 ({email_user})\n- 发件人: {sender}\n- 主题: {subject}\n- 内容: {content}"
-                    await self.context.send_message(session_id, MessageChain([Plain(fallback_msg)]))
-                    return True
+                    return await self._send_fallback_message(session_id, email_user, email_data)
 
                 pure_history, system_prompt = [], ""
                 conv_id = await self.context.conversation_manager.get_curr_conversation_id(session_id)
-                if not conv_id:
-                    conv_id = await self.context.conversation_manager.new_conversation(session_id)
+                if not conv_id: conv_id = await self.context.conversation_manager.new_conversation(session_id)
                 
                 conversation = await self.context.conversation_manager.get_conversation(session_id, conv_id)
                 if conversation:
                     if conversation.history: pure_history = json.loads(conversation.history)
-                    if persona_id := conversation.persona_id:
-                        if persona := await self.context.persona_manager.get_persona(persona_id):
-                            system_prompt = persona.system_prompt
+                    if p_id := conversation.persona_id:
+                        if p := await self.context.persona_manager.get_persona(p_id): system_prompt = p.system_prompt
                 
                 if not system_prompt:
-                    if default_persona := await self.context.persona_manager.get_default_persona_v3(umo=session_id):
-                        system_prompt = default_persona["prompt"]
+                    if d_p := await self.context.persona_manager.get_default_persona_v3(umo=session_id):
+                        system_prompt = d_p["prompt"]
 
                 if not system_prompt:
-                    logger.error(f"[{_metadata['name']}] 无法加载任何人格，播报任务中止。")
-                    return False
+                    logger.error(f"[{_metadata['name']}] 无法加载任何人格，播报任务中止。"); return False
 
                 prompt_template = self.config.get("prompt_template", "")
                 final_prompt = prompt_template.replace("{{user}}", email_user)\
@@ -216,73 +231,24 @@ class EmailNarrator(Star):
 
     @cmd_group.command("on", alias={"开启"})
     async def cmd_on(self, event: AstrMessageEvent):
-        if self.config.get("fixed_target", False):
-            yield event.plain_result("ℹ️ 当前为固定推送目标模式，无法通过指令开启播报。")
-            return
+        if self.config.get("fixed_target", False): yield event.plain_result("ℹ️ 当前为固定推送目标模式，无法通过指令开启播报。"); return
         uid = event.unified_msg_origin
-        if uid in self._targets:
-            yield event.plain_result("✅ 邮件播报功能已经开启啦！")
-            return
+        if uid in self._targets: yield event.plain_result("✅ 邮件播报功能已经开启啦！"); return
         self._targets.add(uid)
         self._save_active_targets()
-        if not self._is_running and len(self._targets) > 0:
-            self._init_notifiers()
-            self._start_email_service()
+        if not self._is_running and len(self._targets) > 0: self._init_notifiers(); self._start_email_service()
         yield event.plain_result(f"✅ 邮件播报功能已开启！")
 
     @cmd_group.command("off", alias={"关闭"})
     async def cmd_off(self, event: AstrMessageEvent):
-        if self.config.get("fixed_target", False):
-            yield event.plain_result("ℹ️ 当前为固定推送目标模式，无法通过指令关闭播报。")
-            return
+        if self.config.get("fixed_target", False): yield event.plain_result("ℹ️ 当前为固定推送目标模式，无法通过指令关闭播报。"); return
         uid = event.unified_msg_origin
-        if uid not in self._targets:
-            yield event.plain_result("❌ 邮件播报功能本来就是关着的哦。")
-            return
+        if uid not in self._targets: yield event.plain_result("❌ 邮件播报功能本来就是关着的哦。"); return
         self._targets.discard(uid)
         self._save_active_targets()
-        if not self._targets:
-            await self._stop_email_service()
+        if not self._targets: await self._stop_email_service()
         yield event.plain_result("✅ 当前会话的邮件播报已关闭。")
 
     @cmd_group.command("status", alias={"状态"})
     async def cmd_status(self, event: AstrMessageEvent):
-        uid = event.unified_msg_origin
-        session_status = "✅ 已开启" if uid in self._targets else "❌ 已关闭"
-        service_status = "🟢 运行中" if self._is_running else "🔴 已停止"
-        status_text = f"""--- 📧 邮件播报员状态 ---\n- 当前会话: {session_status}\n- 监控服务: {service_status}\n- 监控账号数: {len(self._notifiers)} / {len(self.config.get('accounts', []))}\n- 检查间隔: {self._interval} 秒\n- 内容上限: {self._text_num} 字符"""
-        if self.config.get("fixed_target", False):
-            status_text += "\n- 模式: 固定目标模式"
-        else:
-            status_text += "\n\n使用 `/email_narrator on` 来开启播报。"
-        yield event.plain_result(status_text)
-        
-    @cmd_group.command("check_accounts", alias={"检查账号"})
-    async def cmd_check_accounts(self, event: AstrMessageEvent):
-        if not event.is_admin():
-            yield event.plain_result("❌ 权限不足，此指令仅限管理员使用。")
-            return
-        accounts_config = self.config.get("accounts", [])
-        if not accounts_config:
-            yield event.plain_result("ℹ️ 尚未配置任何邮箱账号。")
-            return
-        yield event.plain_result("正在检查所有邮箱账户的连接状态，请稍候...")
-        status_list = []
-        total_accounts = len(accounts_config)
-        valid_count = 0
-        for account_str in accounts_config:
-            try:
-                host, user, password = [part.strip() for part in account_str.split(',')]
-                is_ok = await EmailNotifier.test_connection(host, user, password, logger)
-                if is_ok:
-                    status_list.append(f"  - {user}: ✅ 连接成功"); valid_count += 1
-                else:
-                    status_list.append(f"  - {user}: ❌ 连接失败")
-            except Exception:
-                status_list.append(f"  - {account_str}: ❌ 配置格式错误")
-        response_text = f"📧 邮箱账号连接状态 ({valid_count}/{total_accounts} 有效):\n" + "\n".join(status_list)
-        yield event.plain_result(response_text)
-        
-    async def terminate(self):
-        await self._stop_email_service()
-        logger.info(f"[{_metadata['name']}] 插件已终止。")
+        uid = event.unified_msg
