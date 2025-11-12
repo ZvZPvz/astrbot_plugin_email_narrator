@@ -1,6 +1,6 @@
 # astrbot_plugin_email_narrator
 
-_✨ [astrbot](https://github.com/AstrBotDevs/AstrBot) A2S协议服务器状态查询插件 (Source) ✨_  
+_✨ [astrbot](https://github.com/AstrBotDevs/AstrBot) 智能邮件播报插件 ✨_  
 [![License](https://img.shields.io/badge/License-AGPLv3-purple.svg)](https://opensource.org/license/agpl-v3)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
 [![AstrBot](https://img.shields.io/badge/AstrBot-3.4%2B-orange.svg)](https://github.com/Soulter/AstrBot)
