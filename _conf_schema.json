@@ -21,6 +21,12 @@
     "default": 150,
     "hint": "截取邮件正文的前N个字符交给LLM处理。最小值为 20。"
   },
+  "max_retries": {
+    "description": "LLM处理失败后的最大重试次数",
+    "type": "int",
+    "default": 4,
+    "hint": "当LLM连续处理同一封邮件失败达到此次数后，将发送原始邮件信息作为后备通知。设置为 0 表示无限重试。"
+  },
   "prompt_template": {
     "description": "邮件播报指令模板",
     "type": "text",
